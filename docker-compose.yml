@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-carchecker}
+      POSTGRES_USER: ${POSTGRES_USER:-carchecker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carchecker}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-carchecker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-carchecker}:${POSTGRES_PASSWORD:-carchecker}@db:5432/${POSTGRES_DB:-carchecker}
+      DVLA_API_KEY: ${DVLA_API_KEY}
+      DVSA_API_KEY: ${DVSA_API_KEY}
+      DVSA_CLIENT_ID: ${DVSA_CLIENT_ID}
+      DVSA_CLIENT_SECRET: ${DVSA_CLIENT_SECRET}
+      DVSA_TOKEN_URL: ${DVSA_TOKEN_URL}
+      DVSA_SCOPE: ${DVSA_SCOPE}
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    # entrypoint runs alembic upgrade head then starts uvicorn
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    command: npm run dev
+
+volumes:
+  postgres_data:
